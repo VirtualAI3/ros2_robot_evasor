@@ -1,0 +1,259 @@
+<?xml version="1.0"?>
+<robot xmlns:xacro="http://www.ros.org/wiki/xacro" name="evasor_bot">
+
+
+  <xacro:property name="chassis_length" value="0.35"/>
+  <xacro:property name="chassis_width" value="0.20"/>
+  <xacro:property name="chassis_height" value="0.08"/>
+  <xacro:property name="chassis_z" value="0.05"/>
+  <xacro:property name="wheel_radius" value="0.04"/>
+  <xacro:property name="wheel_width" value="0.03"/>
+  <xacro:property name="wheel_y" value="0.12"/>
+  <xacro:property name="wheel_z" value="0"/>
+  <xacro:property name="front_x" value="0.12"/>
+  <xacro:property name="rear_x" value="-0.12"/>
+  <xacro:property name="lidar_z" value="0.10"/>
+
+  <!-- ==================== BASE ==================== -->
+  <link name="base_footprint"/>
+  <joint name="base_joint" type="fixed">
+    <parent link="base_footprint"/>
+    <child link="base_link"/>
+    <origin xyz="0 0 ${wheel_radius}" rpy="0 0 0"/>
+  </joint>
+
+  <link name="base_link">
+    <visual>
+      <geometry><box size="${chassis_length} ${chassis_width} ${chassis_height}"/></geometry>
+      <origin xyz="0 0 ${chassis_z}" rpy="0 0 0"/>
+      <material name="blue">
+        <color rgba="0.2 0.4 0.8 1.0"/>
+      </material>
+    </visual>
+    <collision>
+      <geometry><box size="${chassis_length} ${chassis_width} ${chassis_height}"/></geometry>
+      <origin xyz="0 0 ${chassis_z}" rpy="0 0 0"/>
+    </collision>
+    <inertial>
+      <mass value="0.5"/>
+      <inertia ixx="0.001" ixy="0" ixz="0" iyy="0.001" iyz="0" izz="0.001"/>
+    </inertial>
+  </link>
+
+  <!-- ==================== REAR WHEELS (traction) ==================== -->
+  <link name="rl_rear_wheel">
+    <visual>
+      <geometry><cylinder radius="${wheel_radius}" length="${wheel_width}"/></geometry>
+      <origin xyz="0 0 0" rpy="1.57079632679 0 0"/>
+      <material name="black"><color rgba="0.1 0.1 0.1 1.0"/></material>
+    </visual>
+    <collision>
+      <geometry><cylinder radius="${wheel_radius}" length="${wheel_width}"/></geometry>
+      <origin xyz="0 0 0" rpy="1.57079632679 0 0"/>
+    </collision>
+    <inertial>
+      <mass value="0.05"/>
+      <inertia ixx="0.0001" ixy="0" ixz="0" iyy="0.0001" iyz="0" izz="0.0001"/>
+    </inertial>
+  </link>
+
+  <link name="rr_rear_wheel">
+    <visual>
+      <geometry><cylinder radius="${wheel_radius}" length="${wheel_width}"/></geometry>
+      <origin xyz="0 0 0" rpy="1.57079632679 0 0"/>
+      <material name="black"><color rgba="0.1 0.1 0.1 1.0"/></material>
+    </visual>
+    <collision>
+      <geometry><cylinder radius="${wheel_radius}" length="${wheel_width}"/></geometry>
+      <origin xyz="0 0 0" rpy="1.57079632679 0 0"/>
+    </collision>
+    <inertial>
+      <mass value="0.05"/>
+      <inertia ixx="0.0001" ixy="0" ixz="0" iyy="0.0001" iyz="0" izz="0.0001"/>
+    </inertial>
+  </link>
+
+  <joint name="rl_wheel_joint" type="continuous">
+    <parent link="base_link"/>
+    <child link="rl_rear_wheel"/>
+    <origin xyz="${rear_x} ${wheel_y} ${wheel_z}" rpy="0 0 0"/>
+    <axis xyz="0 1 0"/>
+    <limit effort="5.0" velocity="10"/>
+  </joint>
+
+  <joint name="rr_wheel_joint" type="continuous">
+    <parent link="base_link"/>
+    <child link="rr_rear_wheel"/>
+    <origin xyz="${rear_x} ${-wheel_y} ${wheel_z}" rpy="0 0 0"/>
+    <axis xyz="0 1 0"/>
+    <limit effort="5.0" velocity="10"/>
+  </joint>
+
+  <!-- ==================== FRONT STEERING ==================== -->
+  <link name="fl_steering_link">
+    <inertial>
+      <mass value="0.01"/>
+      <inertia ixx="0.00001" ixy="0" ixz="0" iyy="0.00001" iyz="0" izz="0.00001"/>
+    </inertial>
+  </link>
+
+  <link name="fr_steering_link">
+    <inertial>
+      <mass value="0.01"/>
+      <inertia ixx="0.00001" ixy="0" ixz="0" iyy="0.00001" iyz="0" izz="0.00001"/>
+    </inertial>
+  </link>
+
+  <joint name="fl_steering_joint" type="revolute">
+    <parent link="base_link"/>
+    <child link="fl_steering_link"/>
+    <origin xyz="${front_x} ${wheel_y} ${wheel_z}" rpy="0 0 0"/>
+    <axis xyz="0 0 1"/>
+    <limit lower="-0.6" upper="0.6" effort="0.5" velocity="5"/>
+  </joint>
+
+  <joint name="fr_steering_joint" type="revolute">
+    <parent link="base_link"/>
+    <child link="fr_steering_link"/>
+    <origin xyz="${front_x} ${-wheel_y} ${wheel_z}" rpy="0 0 0"/>
+    <axis xyz="0 0 1"/>
+    <limit lower="-0.6" upper="0.6" effort="0.5" velocity="5"/>
+  </joint>
+
+  <!-- Front wheel spin (passive, free-spinning) -->
+  <link name="fl_front_wheel">
+    <visual>
+      <geometry><cylinder radius="${wheel_radius}" length="${wheel_width}"/></geometry>
+      <origin xyz="0 0 0" rpy="1.57079632679 0 0"/>
+      <material name="black"><color rgba="0.1 0.1 0.1 1.0"/></material>
+    </visual>
+    <collision>
+      <geometry><cylinder radius="${wheel_radius}" length="${wheel_width}"/></geometry>
+      <origin xyz="0 0 0" rpy="1.57079632679 0 0"/>
+    </collision>
+    <inertial>
+      <mass value="0.05"/>
+      <inertia ixx="0.0001" ixy="0" ixz="0" iyy="0.0001" iyz="0" izz="0.0001"/>
+    </inertial>
+  </link>
+
+  <link name="fr_front_wheel">
+    <visual>
+      <geometry><cylinder radius="${wheel_radius}" length="${wheel_width}"/></geometry>
+      <origin xyz="0 0 0" rpy="1.57079632679 0 0"/>
+      <material name="black"><color rgba="0.1 0.1 0.1 1.0"/></material>
+    </visual>
+    <collision>
+      <geometry><cylinder radius="${wheel_radius}" length="${wheel_width}"/></geometry>
+      <origin xyz="0 0 0" rpy="1.57079632679 0 0"/>
+    </collision>
+    <inertial>
+      <mass value="0.05"/>
+      <inertia ixx="0.0001" ixy="0" ixz="0" iyy="0.0001" iyz="0" izz="0.0001"/>
+    </inertial>
+  </link>
+
+  <joint name="fl_wheel_spin_joint" type="continuous">
+    <parent link="fl_steering_link"/>
+    <child link="fl_front_wheel"/>
+    <origin xyz="0 0 0" rpy="0 0 0"/>
+    <axis xyz="0 1 0"/>
+    <limit effort="0.01" velocity="10"/>
+  </joint>
+
+  <joint name="fr_wheel_spin_joint" type="continuous">
+    <parent link="fr_steering_link"/>
+    <child link="fr_front_wheel"/>
+    <origin xyz="0 0 0" rpy="0 0 0"/>
+    <axis xyz="0 1 0"/>
+    <limit effort="0.01" velocity="10"/>
+  </joint>
+
+  <!-- ==================== LIDAR ==================== -->
+  <link name="lidar_link">
+    <visual>
+      <geometry><cylinder radius="0.025" length="0.02"/></geometry>
+      <origin xyz="0 0 0.01" rpy="0 0 0"/>
+      <material name="red"><color rgba="0.8 0.2 0.2 1.0"/></material>
+    </visual>
+    <collision>
+      <geometry><cylinder radius="0.025" length="0.02"/></geometry>
+      <origin xyz="0 0 0.01" rpy="0 0 0"/>
+    </collision>
+    <inertial>
+      <mass value="0.01"/>
+      <inertia ixx="0.00001" ixy="0" ixz="0" iyy="0.00001" iyz="0" izz="0.00001"/>
+    </inertial>
+  </link>
+
+  <joint name="lidar_joint" type="fixed">
+    <parent link="base_link"/>
+    <child link="lidar_link"/>
+    <origin xyz="${front_x} 0 ${lidar_z}" rpy="0 0 0"/>
+  </joint>
+
+  <!-- ==================== GAZEBO PLUGINS ==================== -->
+  <gazebo>
+    <plugin filename="gz-sim-joint-controller-system" name="gz::sim::systems::JointController">
+      <joint_name>rl_wheel_joint</joint_name>
+    </plugin>
+    <plugin filename="gz-sim-joint-controller-system" name="gz::sim::systems::JointController">
+      <joint_name>rr_wheel_joint</joint_name>
+    </plugin>
+    <plugin filename="gz-sim-joint-position-controller-system" name="gz::sim::systems::JointPositionController">
+      <joint_name>fl_steering_joint</joint_name>
+      <topic>/model/evasor_bot/joint/fl_steering_joint/cmd_pos</topic>
+      <p_gain>1.0</p_gain>
+      <i_gain>0.1</i_gain>
+      <d_gain>0.01</d_gain>
+      <cmd_max>0.6</cmd_max>
+      <cmd_min>-0.6</cmd_min>
+    </plugin>
+    <plugin filename="gz-sim-joint-position-controller-system" name="gz::sim::systems::JointPositionController">
+      <joint_name>fr_steering_joint</joint_name>
+      <topic>/model/evasor_bot/joint/fr_steering_joint/cmd_pos</topic>
+      <p_gain>1.0</p_gain>
+      <i_gain>0.1</i_gain>
+      <d_gain>0.01</d_gain>
+      <cmd_max>0.6</cmd_max>
+      <cmd_min>-0.6</cmd_min>
+    </plugin>
+    <plugin filename="gz-sim-joint-state-publisher-system" name="gz::sim::systems::JointStatePublisher">
+    </plugin>
+  </gazebo>
+
+  <gazebo reference="lidar_link">
+    <sensor type="gpu_lidar" name="lidar_sensor">
+      <pose>0 0 0 0 0 0</pose>
+      <topic>/scan</topic>
+      <update_rate>10</update_rate>
+      <lidar>
+        <scan>
+          <horizontal>
+            <samples>360</samples>
+            <resolution>1</resolution>
+            <min_angle>-3.14159</min_angle>
+            <max_angle>3.14159</max_angle>
+          </horizontal>
+        </scan>
+        <range>
+          <min>0.1</min>
+          <max>5.0</max>
+          <resolution>0.01</resolution>
+        </range>
+        <noise>
+          <type>gaussian</type>
+          <mean>0.0</mean>
+          <stddev>0.01</stddev>
+        </noise>
+      </lidar>
+      <always_on>1</always_on>
+      <visualize>true</visualize>
+    </sensor>
+  </gazebo>
+
+  <gazebo reference="base_link">
+    <material>Gazebo/Blue</material>
+  </gazebo>
+
+</robot>
