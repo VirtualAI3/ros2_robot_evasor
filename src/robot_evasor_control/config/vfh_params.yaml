@@ -1,0 +1,21 @@
+/**:
+  ros__parameters:
+    goal_x: 4.0
+    goal_y: 4.0
+    goal_tolerance: 0.4
+    safe_distance: 1.5
+    linear_speed: 0.25
+    slow_speed: 0.12
+    angular_speed: 0.35
+    robot_width: 0.24
+    clearance: 0.1
+    stuck_timeout: 20.0
+    wheelbase: 0.24
+    track_width: 0.24
+    wheel_radius: 0.04
+    scan_timeout: 3.0
+    recovery_back_distance: 0.8
+    max_steering_angle: 0.6
+    collision_margin: 0.35
+    reverse_speed: -0.12
+    debug: false

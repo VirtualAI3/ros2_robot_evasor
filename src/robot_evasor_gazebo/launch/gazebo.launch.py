@@ -69,8 +69,8 @@ def launch_setup(context, *args, **kwargs):
             '-file', model_path,
             '-name', 'evasor_bot',
             '-allow_renaming', 'true',
-            '-x', '1.0',
-            '-y', '1.0',
+            '-x', '0.0',
+            '-y', '0.0',
             '-z', '0.1',
         ],
     )

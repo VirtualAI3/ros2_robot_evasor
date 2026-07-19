@@ -42,12 +42,26 @@ Visualization Manager:
       Name: LaserScan
       Topic:
         Value: /scan
-      Queue Size: 10
+      Queue Size: 100
       Selectable: true
       Style: Points
       Size (m): 0.02
       Alpha: 0.8
       Color: 255; 0; 0
+      Value: true
+    - Class: rviz_default_plugins/Marker
+      Enabled: true
+      Name: GoalMarker
+      Topic:
+        Value: /goal_marker
+      Queue Size: 10
+      Value: true
+    - Class: rviz_default_plugins/Marker
+      Enabled: true
+      Name: ObstacleMarkers
+      Topic:
+        Value: /obstacle_markers
+      Queue Size: 10
       Value: true
     - Class: rviz_default_plugins/TF
       Enabled: true

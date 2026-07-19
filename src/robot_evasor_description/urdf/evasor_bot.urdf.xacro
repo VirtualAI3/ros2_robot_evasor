@@ -10,9 +10,9 @@
   <xacro:property name="wheel_width" value="0.03"/>
   <xacro:property name="wheel_y" value="0.12"/>
   <xacro:property name="wheel_z" value="0"/>
-  <xacro:property name="front_x" value="0.12"/>
+  <xacro:property name="front_x" value="0.18"/>
   <xacro:property name="rear_x" value="-0.12"/>
-  <xacro:property name="lidar_z" value="0.10"/>
+  <xacro:property name="lidar_z" value="0.15"/>
 
   <!-- ==================== BASE ==================== -->
   <link name="base_footprint"/>

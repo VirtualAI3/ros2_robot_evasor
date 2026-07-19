@@ -4,9 +4,10 @@ import rclpy
 from rclpy.node import Node
 from rclpy.qos import qos_profile_sensor_data
 from sensor_msgs.msg import LaserScan, JointState
-from std_msgs.msg import Float64
+from std_msgs.msg import Float64, ColorRGBA
 from nav_msgs.msg import Odometry
-from geometry_msgs.msg import TransformStamped
+from geometry_msgs.msg import TransformStamped, Point
+from visualization_msgs.msg import Marker
 from tf2_ros import TransformBroadcaster
 
 GOAL_X = 4.0
@@ -36,6 +37,9 @@ def quat_to_yaw(x, y, z, w):
 class ReactiveController(Node):
     def __init__(self):
         super().__init__('reactive_controller')
+        self.declare_parameter('debug', False)
+        self.debug = self.get_parameter('debug').value
+
         self.pose_x = 0.0
         self.pose_y = 0.0
         self.yaw = 0.0
@@ -57,6 +61,8 @@ class ReactiveController(Node):
         self.fr_steer_pub = self.create_publisher(Float64, '/model/evasor_bot/joint/fr_steering_joint/cmd_pos', 10)
 
         self.odom_pub = self.create_publisher(Odometry, '/odom', 10)
+        self.goal_marker_pub = self.create_publisher(Marker, '/goal_marker', 10)
+        self.obstacle_marker_pub = self.create_publisher(Marker, '/obstacle_markers', 10)
         self.tf_broadcaster = TransformBroadcaster(self)
 
         self.last_scan_time = self.get_clock().now()
@@ -159,12 +165,139 @@ class ReactiveController(Node):
         self.min_left = min((ranges[i] for i in left_indices), default=float('inf'))
         self.min_right = min((ranges[i] for i in right_indices), default=float('inf'))
 
+        if self.debug:
+            n_valid = sum(1 for r in msg.ranges if not (math.isinf(r) or math.isnan(r)))
+            n_close = sum(1 for r in msg.ranges
+                          if not (math.isinf(r) or math.isnan(r)) and r < SAFE_DISTANCE)
+            self.get_logger().info(
+                f'LIDAR: {n_valid}/{len(msg.ranges)} valid rays, '
+                f'{n_close} within safe_distance={SAFE_DISTANCE:.1f}m '
+                f'f={self.min_front:.2f} l={self.min_left:.2f} r={self.min_right:.2f}',
+                throttle_duration_sec=1.0)
+
     def normalize_angle(self, angle):
         while angle > math.pi:
             angle -= 2.0 * math.pi
         while angle < -math.pi:
             angle += 2.0 * math.pi
         return angle
+
+    def publish_obstacle_markers(self):
+        if self.scan is None:
+            return
+        marker = Marker()
+        marker.header.frame_id = 'odom'
+        marker.header.stamp = self.get_clock().now().to_msg()
+        marker.ns = 'obstacles'
+        marker.id = 0
+        marker.type = Marker.POINTS
+        marker.action = Marker.ADD
+        marker.pose.orientation.w = 1.0
+        marker.scale.x = 0.08
+        marker.scale.y = 0.08
+
+        msg = self.scan
+        for i in range(len(msg.ranges)):
+            r = msg.ranges[i]
+            if math.isinf(r) or math.isnan(r):
+                continue
+            r = max(r, msg.range_min)
+            if r > SAFE_DISTANCE * 1.2:
+                continue
+
+            angle = msg.angle_min + i * msg.angle_increment
+            world_angle = self.yaw + angle
+
+            ox = self.pose_x + r * math.cos(world_angle)
+            oy = self.pose_y + r * math.sin(world_angle)
+
+            p = Point()
+            p.x = ox
+            p.y = oy
+            p.z = 0.05
+            marker.points.append(p)
+
+            c = ColorRGBA()
+            c.a = 1.0
+            if r < 0.3:
+                c.r = 1.0; c.g = 0.0; c.b = 0.0
+            elif r < OBSTACLE_THRESHOLD:
+                c.r = 1.0; c.g = 0.5; c.b = 0.0
+            elif r < SAFE_DISTANCE:
+                c.r = 1.0; c.g = 1.0; c.b = 0.0
+            else:
+                c.r = 0.0; c.g = 1.0; c.b = 0.0
+            marker.colors.append(c)
+
+        self.obstacle_marker_pub.publish(marker)
+
+    def publish_goal_marker(self):
+        marker = Marker()
+        marker.header.frame_id = 'odom'
+        marker.header.stamp = self.get_clock().now().to_msg()
+        marker.ns = 'goal'
+        marker.id = 0
+        marker.type = Marker.SPHERE
+        marker.action = Marker.ADD
+        marker.pose.position.x = GOAL_X
+        marker.pose.position.y = GOAL_Y
+        marker.pose.position.z = 0.1
+        marker.pose.orientation.w = 1.0
+        marker.scale.x = 0.3
+        marker.scale.y = 0.3
+        marker.scale.z = 0.3
+        marker.color.a = 1.0
+        marker.color.r = 0.0
+        marker.color.g = 1.0
+        marker.color.b = 0.0
+        marker.lifetime.sec = 1
+
+        text = Marker()
+        text.header.frame_id = 'odom'
+        text.header.stamp = self.get_clock().now().to_msg()
+        text.ns = 'goal_text'
+        text.id = 1
+        text.type = Marker.TEXT_VIEW_FACING
+        text.action = Marker.ADD
+        text.pose.position.x = GOAL_X
+        text.pose.position.y = GOAL_Y
+        text.pose.position.z = 0.5
+        text.pose.orientation.w = 1.0
+        text.scale.z = 0.25
+        text.color.a = 1.0
+        text.color.r = 1.0
+        text.color.g = 1.0
+        text.color.b = 1.0
+        text.text = 'META'
+        text.lifetime.sec = 1
+
+        arrow = Marker()
+        arrow.header.frame_id = 'odom'
+        arrow.header.stamp = self.get_clock().now().to_msg()
+        arrow.ns = 'goal_arrow'
+        arrow.id = 2
+        arrow.type = Marker.ARROW
+        arrow.action = Marker.ADD
+        arrow.pose.position.x = self.pose_x
+        arrow.pose.position.y = self.pose_y
+        arrow.pose.position.z = 0.1
+        dx = GOAL_X - self.pose_x
+        dy = GOAL_Y - self.pose_y
+        yaw_to_goal = math.atan2(dy, dx)
+        arrow.pose.orientation.z = math.sin(yaw_to_goal * 0.5)
+        arrow.pose.orientation.w = math.cos(yaw_to_goal * 0.5)
+        arrow.scale.x = math.hypot(dx, dy)
+        arrow.scale.y = 0.05
+        arrow.scale.z = 0.05
+        arrow.color.a = 0.6
+        arrow.color.r = 0.0
+        arrow.color.g = 1.0
+        arrow.color.b = 0.0
+        arrow.lifetime.sec = 1
+
+        self.goal_marker_pub.publish(marker)
+        self.goal_marker_pub.publish(text)
+        self.goal_marker_pub.publish(arrow)
 
     def publish_joint_commands(self, v, w):
         left_vel = (v - w * TRACK_WIDTH / 2.0) / WHEEL_RADIUS
@@ -196,6 +329,9 @@ class ReactiveController(Node):
             self.get_logger().warn('Esperando /scan...', throttle_duration_sec=5.0)
             return
 
+        self.publish_goal_marker()
+        self.publish_obstacle_markers()
+
         elapsed = (self.get_clock().now() - self.last_scan_time).nanoseconds / 1e9
         if elapsed > 3.0:
             min_front = float('inf')
@@ -221,9 +357,19 @@ class ReactiveController(Node):
         if min_front < OBSTACLE_THRESHOLD:
             v = SLOW_SPEED
             w = ANGULAR_SPEED if min_left > min_right else -ANGULAR_SPEED
+            if self.debug:
+                self.get_logger().info(
+                    f'REACTIVE: OBSTACLE_THRESHOLD obs_front={min_front:.2f} '
+                    f'turn={"L" if min_left > min_right else "R"}',
+                    throttle_duration_sec=1.0)
         elif min_front < SAFE_DISTANCE:
             v = SLOW_SPEED
             w = ANGULAR_SPEED * 0.6 if min_left > min_right else -ANGULAR_SPEED * 0.6
+            if self.debug:
+                self.get_logger().info(
+                    f'REACTIVE: SAFE_DISTANCE obs_front={min_front:.2f} '
+                    f'turn={"L" if min_left > min_right else "R"}',
+                    throttle_duration_sec=1.0)
         else:
             angle_to_goal = math.atan2(dy, dx)
             angle_error = self.normalize_angle(angle_to_goal - self.yaw)
@@ -233,10 +379,16 @@ class ReactiveController(Node):
                 w = max(-ANGULAR_SPEED, min(ANGULAR_SPEED, angle_error * 1.5))
             else:
                 w = angle_error * 0.5
+            if self.debug:
+                self.get_logger().info(
+                    f'REACTIVE: SEEK goal_angle={math.degrees(angle_to_goal):.1f}deg '
+                    f'angle_err={math.degrees(angle_error):.1f}deg',
+                    throttle_duration_sec=1.0)
 
         self.get_logger().info(
             f'v={v:.2f}, w={w:.2f} | pos=({self.pose_x:.2f},{self.pose_y:.2f}) | '
-            f'yaw={self.yaw:.2f} | obs_front={min_front:.2f}',
+            f'yaw={self.yaw:.2f} | obs_front={min_front:.2f} '
+            f'obs_left={min_left:.2f} obs_right={min_right:.2f}',
             throttle_duration_sec=2.0
         )
         self.publish_joint_commands(v, w)

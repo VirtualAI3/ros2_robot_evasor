@@ -6,9 +6,11 @@ find_package(ament_cmake_python REQUIRED)
 
 install(PROGRAMS
   robot_evasor_control/reactive_controller.py
+  robot_evasor_control/vfh_controller.py
   DESTINATION lib/${PROJECT_NAME}
 )
 
 install(DIRECTORY launch DESTINATION share/${PROJECT_NAME})
+install(DIRECTORY config DESTINATION share/${PROJECT_NAME})
 
 ament_package()

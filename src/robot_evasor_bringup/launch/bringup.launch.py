@@ -17,9 +17,15 @@ def generate_launch_description():
         ),
         Node(
             package='robot_evasor_control',
-            executable='reactive_controller.py',
+            executable='vfh_controller.py',
             output='screen',
-            parameters=[{'use_sim_time': True}],
+            parameters=[
+                PathJoinSubstitution([
+                    FindPackageShare('robot_evasor_control'),
+                    'config', 'vfh_params.yaml'
+                ]),
+                {'use_sim_time': True},
+            ],
         ),
         Node(
             package='rviz2',
