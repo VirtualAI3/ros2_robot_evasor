@@ -1,23 +1,25 @@
 #!/usr/bin/env python3
 import math
-from enum import Enum
 
 import rclpy
 from rclpy.node import Node
 from rclpy.qos import qos_profile_sensor_data
 from sensor_msgs.msg import LaserScan, JointState
-from std_msgs.msg import Float64, ColorRGBA
+from std_msgs.msg import ColorRGBA
 from geometry_msgs.msg import Twist, PoseStamped, TransformStamped, Point
 from nav_msgs.msg import Odometry
 from visualization_msgs.msg import Marker
 from tf2_ros import TransformBroadcaster
 
 
-class State(Enum):
-    SEEK_GOAL = 1
-    GAP = 2
-    REVERSE = 3
-    STOP = 4
+class ZoneData:
+    __slots__ = ('min_distance', 'density', 'avg_close', 'centroid_angle')
+
+    def __init__(self):
+        self.min_distance = float('inf')
+        self.density = 0.0
+        self.avg_close = 0.0
+        self.centroid_angle = 0.0
 
 
 class VFHController(Node):
@@ -27,7 +29,7 @@ class VFHController(Node):
         self.load_parameters()
         self.init_variables()
         self.init_ros_interfaces()
-        self.get_logger().info('FTG Controller iniciado')
+        self.get_logger().info('FTG Controller iniciado (diff drive + 3 zonas)')
         self.get_logger().info(
             f'Meta: ({self.goal_x:.1f}, {self.goal_y:.1f}), '
             f'tolerancia: {self.goal_tolerance}')
@@ -39,29 +41,28 @@ class VFHController(Node):
             'goal_x': 4.0, 'goal_y': 4.0, 'goal_tolerance': 0.4,
             'safe_distance': 1.5, 'linear_speed': 0.25,
             'slow_speed': 0.12, 'angular_speed': 0.35,
-            'robot_width': 0.24, 'clearance': 0.1,
-            'stuck_timeout': 20.0,
-            'wheelbase': 0.24, 'track_width': 0.24, 'wheel_radius': 0.04,
-            'scan_timeout': 3.0, 'recovery_back_distance': 0.8,
-            'max_steering_angle': 0.6,
-            'collision_margin': 0.35, 'reverse_speed': -0.12,
+            'robot_width': 0.24, 'track_width': 0.24, 'wheel_radius': 0.04,
+            'clearance': 0.1, 'collision_margin': 0.35,
+            'recovery_back_distance': 0.8, 'scan_timeout': 3.0,
+            'smooth_factor': 0.20, 'max_accel_linear': 0.4,
+            'max_accel_angular': 0.8, 'front_angle': 30.0,
+            'side_angle': 90.0, 'loop_radius': 0.3,
+            'loop_count_threshold': 3, 'loop_history_size': 200,
             'debug': False,
         }.items():
             self.declare_parameter(name, default)
 
     def load_parameters(self):
         p = {}
-        for name in ('goal_x', 'goal_y', 'goal_tolerance',
-                      'safe_distance',
-                      'linear_speed', 'slow_speed',
-                      'angular_speed',
-                      'robot_width', 'clearance',
-                      'stuck_timeout',
-                      'wheelbase', 'track_width', 'wheel_radius',
-                      'scan_timeout', 'recovery_back_distance',
-                      'max_steering_angle',
-                      'collision_margin', 'reverse_speed',
-                      'debug'):
+        for name in (
+            'goal_x', 'goal_y', 'goal_tolerance',
+            'safe_distance', 'linear_speed', 'slow_speed', 'angular_speed',
+            'robot_width', 'track_width', 'wheel_radius', 'clearance',
+            'collision_margin', 'recovery_back_distance', 'scan_timeout',
+            'smooth_factor', 'max_accel_linear', 'max_accel_angular',
+            'front_angle', 'side_angle', 'loop_radius',
+            'loop_count_threshold', 'loop_history_size', 'debug',
+        ):
             p[name] = self.get_parameter(name).value
         self.goal_x = p['goal_x']
         self.goal_y = p['goal_y']
@@ -71,37 +72,49 @@ class VFHController(Node):
         self.slow_speed = p['slow_speed']
         self.angular_speed = p['angular_speed']
         self.robot_width = p['robot_width']
-        self.clearance = p['clearance']
-        self.stuck_timeout = p['stuck_timeout']
-        self.wheelbase = p['wheelbase']
         self.track_width = p['track_width']
         self.wheel_radius = p['wheel_radius']
-        self.scan_timeout = p['scan_timeout']
-        self.recovery_back_distance = p['recovery_back_distance']
-        self.max_steering_angle = p['max_steering_angle']
+        self.clearance = p['clearance']
         self.collision_margin = p['collision_margin']
-        self.reverse_speed = p['reverse_speed']
+        self.recovery_back_distance = p['recovery_back_distance']
+        self.scan_timeout = p['scan_timeout']
+        self.smooth_factor = p['smooth_factor']
+        self.max_accel_linear = p['max_accel_linear']
+        self.max_accel_angular = p['max_accel_angular']
+        self.front_angle = math.radians(p['front_angle'])
+        self.side_angle = math.radians(p['side_angle'])
+        self.loop_radius = p['loop_radius']
+        self.loop_count_threshold = p['loop_count_threshold']
+        self.loop_history_size = p['loop_history_size']
         self.debug = p['debug']
         self.min_gap_width = self.robot_width + self.clearance
+
+        self.zones_def = {
+            'front': (-self.front_angle, self.front_angle),
+            'left': (self.front_angle, self.front_angle + self.side_angle),
+            'right': (-self.front_angle - self.side_angle, -self.front_angle),
+        }
 
     # ===================== INIT =====================
 
     def init_variables(self):
-        self.state = State.SEEK_GOAL
-        self.entry_time = self.get_clock().now()
-        self.entry_yaw = 0.0
-        self.entry_x = 0.0
-        self.entry_y = 0.0
         self.pose_x = 0.0
         self.pose_y = 0.0
         self.yaw = 0.0
-        self.scan = None
-        self.last_scan_time = self.get_clock().now()
         self.prev_left_pos = None
         self.prev_right_pos = None
-        self.joint_states_received = False
-        self.goal_x = self.get_parameter('goal_x').value
-        self.goal_y = self.get_parameter('goal_y').value
+        self.scan = None
+        self.last_scan_time = self.get_clock().now()
+        self.smooth_v = 0.0
+        self.smooth_w = 0.0
+        self.prev_v = 0.0
+        self.prev_w = 0.0
+        self.dt = 0.1
+        self.reversing = False
+        self.reverse_start_pose = (0.0, 0.0)
+        self.reverse_start_time = None
+        self.position_history = []
+        self.loop_detected = False
 
     def init_ros_interfaces(self):
         self.create_subscription(
@@ -113,14 +126,6 @@ class VFHController(Node):
             PoseStamped, '/goal_pose', self.goal_cb, 10)
 
         self.cmd_vel_pub = self.create_publisher(Twist, '/cmd_vel', 10)
-        self.rl_pub = self.create_publisher(
-            Float64, '/model/evasor_bot/joint/rl_wheel_joint/cmd_vel', 10)
-        self.rr_pub = self.create_publisher(
-            Float64, '/model/evasor_bot/joint/rr_wheel_joint/cmd_vel', 10)
-        self.fl_pub = self.create_publisher(
-            Float64, '/model/evasor_bot/joint/fl_steering_joint/cmd_pos', 10)
-        self.fr_pub = self.create_publisher(
-            Float64, '/model/evasor_bot/joint/fr_steering_joint/cmd_pos', 10)
         self.odom_pub = self.create_publisher(Odometry, '/odom', 10)
         self.goal_marker_pub = self.create_publisher(Marker, '/goal_marker', 10)
         self.obstacle_marker_pub = self.create_publisher(Marker, '/obstacle_markers', 10)
@@ -137,9 +142,6 @@ class VFHController(Node):
             f'Nuevo goal: ({self.goal_x:.2f}, {self.goal_y:.2f})')
 
     def joint_state_cb(self, msg):
-        if not self.joint_states_received:
-            self.joint_states_received = True
-            self.get_logger().info('/joint_states recibido')
         try:
             rl = msg.position[msg.name.index('rl_wheel_joint')]
             rr = msg.position[msg.name.index('rr_wheel_joint')]
@@ -148,6 +150,8 @@ class VFHController(Node):
         if self.prev_left_pos is None:
             self.prev_left_pos = rl
             self.prev_right_pos = rr
+            if self.debug:
+                self.get_logger().info(f'ODOM: inicio odometría rl={rl:.2f} rr={rr:.2f}')
             return
         dl = (rl - self.prev_left_pos) * self.wheel_radius
         dr = (rr - self.prev_right_pos) * self.wheel_radius
@@ -158,20 +162,13 @@ class VFHController(Node):
         self.pose_y += ds * math.sin(self.yaw)
         self.prev_left_pos = rl
         self.prev_right_pos = rr
-        self.publish_odom()
-
-    def scan_cb(self, msg):
-        self.scan = msg
-        self.last_scan_time = self.get_clock().now()
         if self.debug:
-            n_valid = sum(1 for r in msg.ranges if not (math.isinf(r) or math.isnan(r)))
-            n_close = sum(1 for r in msg.ranges
-                          if not (math.isinf(r) or math.isnan(r)) and r < self.safe_distance)
             self.get_logger().info(
-                f'LIDAR: {n_valid}/{len(msg.ranges)} valid rays, {n_close} close',
-                throttle_duration_sec=1.0)
-
-    # ===================== ODOMETRY / TF =====================
+                f'ODOM: rl={rl:.2f}rr={rr:.2f} dl={dl:.3f}dr={dr:.3f} '
+                f'ds={ds:.3f}dy={dy:.3f} '
+                f'pos=({self.pose_x:.2f},{self.pose_y:.2f}) yaw={math.degrees(self.yaw):.1f}deg',
+                throttle_duration_sec=0.5)
+        self.publish_odom()
 
     def publish_odom(self):
         now = self.get_clock().now()
@@ -201,7 +198,58 @@ class VFHController(Node):
         odom.pose.covariance[35] = 0.1
         self.odom_pub.publish(odom)
 
-    # ===================== FTG (Follow The Gap) =====================
+    def scan_cb(self, msg):
+        self.scan = msg
+        self.last_scan_time = self.get_clock().now()
+        if self.debug:
+            n_valid = sum(1 for r in msg.ranges if not (math.isinf(r) or math.isnan(r)))
+            n_close = sum(1 for r in msg.ranges
+                          if not (math.isinf(r) or math.isnan(r)) and r < self.safe_distance)
+            self.get_logger().info(
+                f'LIDAR: {n_valid}/{len(msg.ranges)} valid rays, {n_close} close',
+                throttle_duration_sec=1.0)
+
+    # ===================== ZONE PROCESSING =====================
+
+    def compute_zones(self):
+        zones = {name: ZoneData() for name in self.zones_def}
+        if self.scan is None:
+            return zones
+
+        msg = self.scan
+        total_rays = len(msg.ranges)
+        close_counts = {name: 0 for name in self.zones_def}
+        close_sum = {name: 0.0 for name in self.zones_def}
+        hit_count = {name: 0 for name in self.zones_def}
+
+        for i in range(total_rays):
+            r = msg.ranges[i]
+            if math.isinf(r) or math.isnan(r):
+                continue
+            r = max(r, msg.range_min)
+            angle = msg.angle_min + i * msg.angle_increment
+
+            for name, (start, end) in self.zones_def.items():
+                if start <= angle <= end:
+                    hit_count[name] += 1
+                    if r < zones[name].min_distance:
+                        zones[name].min_distance = r
+                        zones[name].centroid_angle = angle
+                    if r < self.safe_distance:
+                        close_counts[name] += 1
+                        close_sum[name] += r
+
+        for name in self.zones_def:
+            total = max(hit_count[name], 1)
+            zones[name].density = close_counts[name] / total
+            zones[name].avg_close = (close_sum[name] / max(close_counts[name], 1)
+                                     if close_counts[name] > 0 else self.safe_distance)
+            if zones[name].min_distance == float('inf'):
+                zones[name].min_distance = msg.range_max
+
+        return zones
+
+    # ===================== GAP DETECTION =====================
 
     def find_gaps(self):
         if self.scan is None:
@@ -234,11 +282,6 @@ class VFHController(Node):
             else:
                 i += 1
 
-        if self.debug:
-            self.get_logger().info(
-                f'GAPS: {len(gaps)} found ' +
-                ', '.join(f'w={math.degrees(g["width"]):.1f}deg c={math.degrees(g["center"]):.1f}deg' for g in gaps),
-                throttle_duration_sec=1.0)
         return gaps
 
     def select_best_gap(self, gaps):
@@ -250,131 +293,153 @@ class VFHController(Node):
         best_score = -float('inf')
         for g in gaps:
             if g['width'] < self.min_gap_width:
-                if self.debug:
-                    self.get_logger().info(
-                        f'GAP_SKIP: w={math.degrees(g["width"]):.1f}deg < {math.degrees(self.min_gap_width):.1f}deg',
-                        throttle_duration_sec=1.0)
                 continue
             diff = abs(self.normalize_angle(g['center'] - goal_a))
-            score = g['width'] * 2.0 - diff * 0.8
-            if self.debug:
-                self.get_logger().info(
-                    f'GAP_SCORE: w={math.degrees(g["width"]):.1f}deg diff={math.degrees(diff):.1f}deg score={score:.3f}',
-                    throttle_duration_sec=1.0)
+            score = -diff * 3.0 + g['width'] * 0.5
             if score > best_score:
                 best_score = score
                 best = g
-        if best and self.debug:
-            self.get_logger().info(
-                f'GAP_BEST: w={math.degrees(best["width"]):.1f}deg c={math.degrees(best["center"]):.1f}deg score={best_score:.3f}',
-                throttle_duration_sec=1.0)
         return best
 
-    def get_front_clearance_raw(self):
-        if self.scan is None:
-            return float('inf')
-        msg = self.scan
-        half_angle = math.radians(15)
-        d = float('inf')
-        for i in range(len(msg.ranges)):
-            angle = msg.angle_min + i * msg.angle_increment
-            if abs(angle) > half_angle:
-                continue
-            r = msg.ranges[i]
-            if math.isinf(r) or math.isnan(r):
-                continue
-            d = min(d, max(r, msg.range_min))
-        return max(0.0, d - self.collision_margin)
+    # ===================== NAVIGATION ENGINE =====================
 
-    def get_side_clearance_raw(self, left=True):
-        if self.scan is None:
-            return float('inf')
-        msg = self.scan
-        if left:
-            s_ang = math.radians(30)
-            e_ang = math.radians(90)
-        else:
-            s_ang = math.radians(-90)
-            e_ang = math.radians(-30)
-        d = float('inf')
-        for i in range(len(msg.ranges)):
-            angle = msg.angle_min + i * msg.angle_increment
-            if angle < s_ang or angle > e_ang:
-                continue
-            r = msg.ranges[i]
-            if math.isinf(r) or math.isnan(r):
-                continue
-            d = min(d, max(r, msg.range_min))
-        return max(0.0, d - self.collision_margin)
-
-    def best_escape_dir(self):
-        left = self.get_side_clearance_raw(left=True)
-        right = self.get_side_clearance_raw(left=False)
-        return 1.0 if left > right else -1.0
-
-    def has_frontal_gap(self, gaps):
-        for g in gaps:
-            if abs(g['center']) < math.radians(90) and g['width'] > self.min_gap_width:
-                return True
-        return False
-
-    def turn_toward_goal(self):
+    def compute_navigation(self, zones, gaps):
         dx = self.goal_x - self.pose_x
         dy = self.goal_y - self.pose_y
-        goal_a = math.atan2(dy, dx)
-        err = self.normalize_angle(goal_a - self.yaw)
-        w = max(-self.angular_speed, min(self.angular_speed, err * 1.5))
-        return 0.0, w
+        goal_angle = math.atan2(dy, dx)
+        heading_error = self.normalize_angle(goal_angle - self.yaw)
+        dist = math.hypot(dx, dy)
 
-    # ===================== UTILITY =====================
+        if dist < self.goal_tolerance:
+            if self.debug:
+                self.get_logger().info(f'NAV: meta alcanzada d={dist:.2f}<tol={self.goal_tolerance}')
+            return 0.0, 0.0
 
-    @staticmethod
-    def normalize_angle(a):
-        while a > math.pi:
-            a -= 2.0 * math.pi
-        while a < -math.pi:
-            a += 2.0 * math.pi
-        return a
+        front = zones['front']
+        left = zones['left']
+        right = zones['right']
+        front_urgency = 1.0 - min(front.min_distance / self.safe_distance, 1.0)
+        left_urgency = 1.0 - min(left.min_distance / self.safe_distance, 1.0)
+        right_urgency = 1.0 - min(right.min_distance / self.safe_distance, 1.0)
 
-    # ===================== STATE MACHINE =====================
+        lateral_bias = right_urgency - left_urgency
+        gap_steer = 0.0
+        gap_info = 'none'
 
-    def set_state(self, new_state, reason=''):
-        if self.state == new_state:
-            return
-        old = self.state
-        self.state = new_state
-        self.entry_time = self.get_clock().now()
-        self.entry_yaw = self.yaw
-        self.entry_x = self.pose_x
-        self.entry_y = self.pose_y
-        msg = f'FSM: {old.name} -> {new_state.name}'
-        if reason:
-            msg += f' ({reason})'
-        self.get_logger().info(msg)
+        if front_urgency > 0.3 and gaps:
+            best = self.select_best_gap(gaps)
+            if best:
+                gap_steer = self.normalize_angle(best['center'])
+                gap_info = f'c={math.degrees(best["center"]):.0f}deg w={math.degrees(best["width"]):.0f}deg'
+                if self.debug:
+                    self.get_logger().info(
+                        f'GAP: {gap_info} goal_a={math.degrees(goal_angle):.0f}deg '
+                        f'diff={abs(math.degrees(self.normalize_angle(best["center"] - goal_angle))):.0f}deg',
+                        throttle_duration_sec=0.5)
 
-    def elapsed_since_entry(self):
-        return (self.get_clock().now() - self.entry_time).nanoseconds / 1e9
-
-    def dist_to_goal(self):
-        return math.hypot(self.goal_x - self.pose_x, self.goal_y - self.pose_y)
-
-    def check_stuck(self, d):
-        if self.state in (State.SEEK_GOAL, State.GAP):
-            elapsed = self.elapsed_since_entry()
-            moved = math.hypot(self.pose_x - self.entry_x, self.pose_y - self.entry_y)
-            if self.debug and elapsed > self.stuck_timeout * 0.7:
+        if self.reversing:
+            backed = math.hypot(self.pose_x - self.reverse_start_pose[0],
+                                self.pose_y - self.reverse_start_pose[1])
+            elapsed_rev = (self.get_clock().now() - self.reverse_start_time).nanoseconds / 1e9
+            if self.debug:
                 self.get_logger().info(
-                    f'STUCK: elapsed={elapsed:.1f}s moved={moved:.2f}m state={self.state.name}',
-                    throttle_duration_sec=1.0)
-            return elapsed > self.stuck_timeout and moved < 0.3
-        return False
+                    f'REV: backed={backed:.2f}/0.4 elapsed={elapsed_rev:.1f}s/3.0 '
+                    f'front_urg={front_urgency:.2f} heading_err={math.degrees(heading_error):.0f}deg',
+                    throttle_duration_sec=0.3)
+            if backed >= 0.4 or front_urgency < 0.4 or elapsed_rev >= 3.0:
+                self.reversing = False
+                self.get_logger().info(
+                    f'REVERSE exit: backed={backed:.2f} urg={front_urgency:.2f} '
+                    f'elapsed={elapsed_rev:.1f}s')
+                return self.linear_speed, 0.0
+            w = self.normalize_angle(goal_angle - self.yaw) * 0.8
+            w = max(-self.angular_speed, min(self.angular_speed, w))
+            return self.slow_speed * -0.5, w
+
+        if front.min_distance < self.collision_margin * 0.5:
+            self.reversing = True
+            self.reverse_start_pose = (self.pose_x, self.pose_y)
+            self.reverse_start_time = self.get_clock().now()
+            self.get_logger().warn(
+                f'INICIO REVERSE: front={front.min_distance:.2f}m '
+                f'coll_margin*0.5={self.collision_margin*0.5:.2f}m '
+                f'lateral_bias={lateral_bias:.2f}')
+            w = lateral_bias * self.angular_speed * 0.5
+            return self.slow_speed * -0.8, w
+
+        decision = ''
+        if front_urgency < 0.2:
+            v = self.linear_speed
+            w = heading_error * 1.8
+            decision = 'SEEK'
+        elif front_urgency < 0.6:
+            v = self.linear_speed * (1.0 - front_urgency * 0.5)
+            w_blend = lateral_bias * front_urgency
+            if abs(gap_steer) > 0.1 and gap_steer * lateral_bias > -0.1:
+                w_blend = w_blend * 0.6 + gap_steer * 0.4
+            w = heading_error * (1.0 - front_urgency * 0.7) + w_blend
+            decision = 'BLEND'
+        else:
+            v = self.slow_speed * (1.0 - front_urgency * 0.5)
+            if abs(gap_steer) > 0.1:
+                w = gap_steer * 0.7 + lateral_bias * 0.3
+                decision = 'GAP'
+            else:
+                w = lateral_bias * 0.8 + heading_error * 0.2
+                decision = 'ESCAPE'
+
+        w = self.clamp(w, -self.angular_speed, self.angular_speed)
+
+        if self.debug:
+            self.get_logger().info(
+                f'NAV[{decision}] v={v:.2f} w={math.degrees(w):.0f}deg/s | '
+                f'urg: f={front_urgency:.2f} l={left_urgency:.2f} r={right_urgency:.2f} | '
+                f'heading_err={math.degrees(heading_error):.0f}deg gap_steer={math.degrees(gap_steer):.0f}deg | '
+                f'gap={gap_info}',
+                throttle_duration_sec=0.5)
+
+        return v, w
+
+    # ===================== LOOP DETECTION =====================
+
+    def update_loop_detection(self):
+        if self.reversing:
+            return
+
+        now = self.get_clock().now()
+        current = (self.pose_x, self.pose_y)
+
+        if len(self.position_history) >= 5:
+            avg_speed = 0.0
+            for px, py, t in self.position_history[-5:]:
+                speed = math.hypot(current[0] - px, current[1] - py) / max((now - t).nanoseconds / 1e9, 0.001)
+                avg_speed += speed
+            avg_speed /= 5.0
+            if avg_speed > 0.03:
+                self.position_history.clear()
+                self.loop_detected = False
+                return
+
+        self.position_history.append((*current, now))
+        if len(self.position_history) > self.loop_history_size:
+            self.position_history.pop(0)
+
+        if len(self.position_history) < 20:
+            return
+
+        visit_count = 0
+        for px, py, t in self.position_history[:-10]:
+            if math.hypot(px - current[0], py - current[1]) < self.loop_radius:
+                if (now - t).nanoseconds / 1e9 > 5.0:
+                    visit_count += 1
+
+        self.loop_detected = visit_count >= self.loop_count_threshold
+        if self.loop_detected:
+            self.get_logger().warn(f'BUCLE detectado: {visit_count} visitas en ({self.pose_x:.2f}, {self.pose_y:.2f})')
 
     # ===================== CONTROL LOOP =====================
 
     def control_loop(self):
-        if not self.joint_states_received:
-            self.get_logger().warn('Esperando joint_states...', throttle_duration_sec=5.0)
-            return
         if self.scan is None:
             self.get_logger().warn('Esperando scan...', throttle_duration_sec=5.0)
             return
@@ -388,148 +453,77 @@ class VFHController(Node):
         self.publish_goal_marker()
         self.publish_obstacle_markers()
 
-        d = self.dist_to_goal()
+        zones = self.compute_zones()
+        gaps = self.find_gaps()
+
+        d = math.hypot(self.goal_x - self.pose_x, self.goal_y - self.pose_y)
         if d < self.goal_tolerance:
-            if self.state != State.STOP:
-                self.get_logger().info(f'Meta alcanzada en ({self.pose_x:.2f}, {self.pose_y:.2f})!')
-                self.set_state(State.STOP, reason='goal reached')
+            self.get_logger().info(f'Meta alcanzada en ({self.pose_x:.2f}, {self.pose_y:.2f})!')
             self.publish_commands(0.0, 0.0)
             return
 
-        gaps = self.find_gaps()
-        best_gap = self.select_best_gap(gaps)
+        target_v, target_w = self.compute_navigation(zones, gaps)
 
-        dx = self.goal_x - self.pose_x
-        dy = self.goal_y - self.pose_y
-        goal_a = math.atan2(dy, dx)
-        goal_err = abs(self.normalize_angle(goal_a - self.yaw))
-        front_fc = self.get_front_clearance_raw()
+        self.update_loop_detection()
+        if self.loop_detected and not self.reversing:
+            self.reversing = True
+            self.reverse_start_pose = (self.pose_x, self.pose_y)
+            self.reverse_start_time = self.get_clock().now()
+            target_v = self.slow_speed * -0.8
+            target_w = 0.5
+
+        self.smooth_v = self.smooth_v * (1.0 - self.smooth_factor) + target_v * self.smooth_factor
+        self.smooth_w = self.smooth_w * (1.0 - self.smooth_factor) + target_w * self.smooth_factor
+
+        v = self.clamp(self.smooth_v,
+                       self.prev_v - self.max_accel_linear * self.dt,
+                       self.prev_v + self.max_accel_linear * self.dt)
+        w = self.clamp(self.smooth_w,
+                       self.prev_w - self.max_accel_angular * self.dt,
+                       self.prev_w + self.max_accel_angular * self.dt)
+
+        self.prev_v = v
+        self.prev_w = w
 
         if self.debug:
-            target_str = 'none' if best_gap is None else f'c={math.degrees(best_gap["center"]):.1f}deg w={math.degrees(best_gap["width"]):.1f}deg'
             self.get_logger().info(
-                f'DEBUG: goal_a={math.degrees(goal_a):.1f}deg err={math.degrees(goal_err):.1f}deg '
-                f'fc={front_fc:.2f} d={d:.2f} gaps={len(gaps)} frontal={self.has_frontal_gap(gaps)} '
-                f'best={target_str}',
+                f'v={v:.2f} w={w:.2f} | pos=({self.pose_x:.2f},{self.pose_y:.2f}) '
+                f'f={zones["front"].min_distance:.2f} '
+                f'l={zones["left"].min_distance:.2f} '
+                f'r={zones["right"].min_distance:.2f} '
+                f'd={d:.2f} rev={self.reversing}',
                 throttle_duration_sec=1.0)
-
-        has_frontal = self.has_frontal_gap(gaps)
-        too_close = front_fc < self.collision_margin * 0.3
-
-        if too_close and self.state not in (State.REVERSE, State.STOP):
-            self.set_state(State.REVERSE, reason=f'fc={front_fc:.2f} < collision_margin*0.3={self.collision_margin*0.3:.2f}')
-        elif not has_frontal and self.state == State.SEEK_GOAL:
-            if best_gap:
-                self.set_state(State.GAP, reason='no frontal gaps, best behind')
-            elif too_close:
-                self.set_state(State.REVERSE, reason='no gaps at all, too close')
-
-        if self.state == State.STOP:
-            self.publish_commands(0.0, 0.0)
-            return
-
-        v = 0.0
-        w = 0.0
-
-        if self.state == State.SEEK_GOAL:
-            v, w = self.run_seek(d, goal_a, goal_err, front_fc)
-        elif self.state == State.GAP:
-            v, w = self.run_gap(goal_a, best_gap, front_fc, has_frontal, gaps)
-        elif self.state == State.REVERSE:
-            v, w = self.run_reverse(front_fc)
-
-        if self.check_stuck(d):
-            self.get_logger().warn(f'Atascado -> REVERSE')
-            self.set_state(State.REVERSE, reason='stuck')
-            v, w = self.run_reverse(front_fc)
-
-        self.get_logger().info(
-            f'{self.state.name:15s} | v={v:.2f} w={w:.2f} | '
-            f'pos=({self.pose_x:.2f},{self.pose_y:.2f}) fc={front_fc:.2f} d={d:.2f}',
-            throttle_duration_sec=2.0)
 
         self.publish_commands(v, w)
 
-    # ===================== STATE BEHAVIORS =====================
+    # ===================== COMMAND PUBLISHING =====================
 
-    def run_seek(self, d, goal_a, goal_err, front_fc):
-        if front_fc < self.collision_margin * 0.3:
-            self.set_state(State.REVERSE, reason=f'seek: fc={front_fc:.2f}')
-            return self.reverse_speed, 0.0
+    def publish_commands(self, v, w):
+        twist = Twist()
+        twist.linear.x = v
+        twist.angular.z = w
+        self.cmd_vel_pub.publish(twist)
 
-        if front_fc < self.safe_distance:
-            left = self.get_side_clearance_raw(left=True)
-            right = self.get_side_clearance_raw(left=False)
-            dir_ = 1.0 if left > right else -1.0
-            speed = self.slow_speed * min(1.0, front_fc / (self.safe_distance * 0.5))
-            w = dir_ * self.angular_speed * min(1.0, 1.0 - (front_fc / self.safe_distance))
-            if self.debug:
-                self.get_logger().info(
-                    f'STEER_AROUND: fc={front_fc:.2f} l={left:.2f} r={right:.2f} '
-                    f'dir={"L" if dir_ > 0 else "R"} v={speed:.2f} w={w:.2f}',
-                    throttle_duration_sec=0.5)
-            return speed, w
-
-        near_goal = d < 2.0
-        if near_goal and goal_err < math.radians(60):
-            speed = min(self.linear_speed * (d / 2.0), 0.2)
-            w = self.normalize_angle(goal_a - self.yaw) * 1.5
-            w = max(-self.angular_speed, min(self.angular_speed, w))
-            if self.debug:
-                self.get_logger().info(f'SEEK_NEAR: v={speed:.2f} w={w:.2f}', throttle_duration_sec=0.5)
-            return speed, w
-
-        if goal_err < math.radians(90):
-            v = self.linear_speed * min(1.0, front_fc / self.safe_distance)
-            w = self.normalize_angle(goal_a - self.yaw) * 1.5
-            w = max(-self.angular_speed, min(self.angular_speed, w))
-            return v, w
-
-        return self.turn_toward_goal()
-
-    def run_gap(self, goal_a, best_gap, front_fc, has_frontal, gaps):
-        if has_frontal and front_fc > self.safe_distance:
-            self.set_state(State.SEEK_GOAL, reason=f'gap clear: fc={front_fc:.2f}')
-            return self.run_seek(self.dist_to_goal(), goal_a,
-                                 abs(self.normalize_angle(goal_a - self.yaw)), front_fc)
-
-        if best_gap is None:
-            if front_fc < self.collision_margin * 0.3:
-                self.set_state(State.REVERSE, reason='no gap, too close')
-                return self.reverse_speed, 0.0
-            return self.turn_toward_goal()
-
-        err = self.normalize_angle(best_gap['center'] - self.yaw)
-        w = max(-self.angular_speed, min(self.angular_speed, err * 1.2))
-        base_w = best_gap['width'] / math.pi
-        v = self.slow_speed * min(1.0, base_w + 0.3)
-
-        if has_frontal and front_fc > self.collision_margin:
-            goal_err = self.normalize_angle(goal_a - self.yaw)
-            blend = min(1.0, front_fc / self.safe_distance)
-            w_goal = max(-self.angular_speed, min(self.angular_speed, goal_err * 1.5))
-            w = w * (1.0 - blend * 0.5) + w_goal * (blend * 0.5)
-            v = v * (1.0 - blend * 0.3) + self.linear_speed * (blend * 0.3)
-
-        return v, w
-
-    def run_reverse(self, front_fc):
-        backed = math.hypot(self.pose_x - self.entry_x, self.pose_y - self.entry_y)
         if self.debug:
             self.get_logger().info(
-                f'REVERSE: backed={backed:.2f}/{self.recovery_back_distance} fc={front_fc:.2f}',
-                throttle_duration_sec=1.0)
+                f'CMD: v={v:.2f} w={w:.2f}',
+                throttle_duration_sec=0.5)
 
-        if backed >= self.recovery_back_distance:
-            self.set_state(State.SEEK_GOAL, reason=f'reverse done: backed={backed:.2f}')
-            return self.linear_speed * 0.5, 0.0
+    # ===================== UTILITY =====================
 
-        dir_ = self.best_escape_dir()
-        w = dir_ * self.angular_speed * 0.5
-        v = self.reverse_speed
-        return v, w
+    @staticmethod
+    def normalize_angle(a):
+        while a > math.pi:
+            a -= 2.0 * math.pi
+        while a < -math.pi:
+            a += 2.0 * math.pi
+        return a
 
-    # ===================== OBSTACLE MARKERS =====================
+    @staticmethod
+    def clamp(val, lo, hi):
+        return max(lo, min(hi, val))
+
+    # ===================== MARKERS =====================
 
     def publish_obstacle_markers(self):
         if self.scan is None:
@@ -579,8 +573,6 @@ class VFHController(Node):
             marker.colors.append(c)
 
         self.obstacle_marker_pub.publish(marker)
-
-    # ===================== GOAL MARKER =====================
 
     def publish_goal_marker(self):
         marker = Marker()
@@ -649,37 +641,6 @@ class VFHController(Node):
         self.goal_marker_pub.publish(marker)
         self.goal_marker_pub.publish(text)
         self.goal_marker_pub.publish(arrow)
-
-    # ===================== COMMAND PUBLISHING =====================
-
-    def publish_commands(self, v, w):
-        twist = Twist()
-        twist.linear.x = v
-        twist.angular.z = w
-        self.cmd_vel_pub.publish(twist)
-
-        half_track = self.track_width * 0.5
-        rl_vel = (v - w * half_track) / self.wheel_radius if self.wheel_radius > 0 else 0.0
-        rr_vel = (v + w * half_track) / self.wheel_radius if self.wheel_radius > 0 else 0.0
-
-        if abs(v) > 0.01:
-            steer = math.atan2(w * self.wheelbase, abs(v))
-            if v < 0:
-                steer = -steer
-        else:
-            steer = 0.0
-        steer = max(-self.max_steering_angle,
-                    min(self.max_steering_angle, steer))
-
-        self.rl_pub.publish(Float64(data=rl_vel))
-        self.rr_pub.publish(Float64(data=rr_vel))
-        self.fl_pub.publish(Float64(data=steer))
-        self.fr_pub.publish(Float64(data=steer))
-
-        self.get_logger().info(
-            f'CMD: v={v:.2f} w={w:.2f} | '
-            f'lw={rl_vel:.1f} rw={rr_vel:.1f} steer={steer:.2f}',
-            throttle_duration_sec=2.0)
 
 
 def main(args=None):

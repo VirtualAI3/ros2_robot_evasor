@@ -79,15 +79,12 @@ def launch_setup(context, *args, **kwargs):
         package='ros_gz_bridge',
         executable='parameter_bridge',
         output='screen',
-        arguments=[
-            '/scan@sensor_msgs/msg/LaserScan[gz.msgs.LaserScan',
-            '/clock@rosgraph_msgs/msg/Clock[gz.msgs.Clock',
-            '/model/evasor_bot/joint/rl_wheel_joint/cmd_vel@std_msgs/msg/Float64]gz.msgs.Double',
-            '/model/evasor_bot/joint/rr_wheel_joint/cmd_vel@std_msgs/msg/Float64]gz.msgs.Double',
-            '/model/evasor_bot/joint/fl_steering_joint/cmd_pos@std_msgs/msg/Float64]gz.msgs.Double',
-            '/model/evasor_bot/joint/fr_steering_joint/cmd_pos@std_msgs/msg/Float64]gz.msgs.Double',
-            '/world/room_world/model/evasor_bot/joint_state@sensor_msgs/msg/JointState[gz.msgs.Model',
-        ],
+        parameters=[{
+            'config_file': PathJoinSubstitution([
+                FindPackageShare('robot_evasor_gazebo'), 'config', 'bridge.yaml'
+            ]),
+            'use_sim_time': True,
+        }],
     )
 
     wait = ExecuteProcess(

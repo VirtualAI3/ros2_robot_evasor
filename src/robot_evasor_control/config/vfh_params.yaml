@@ -6,16 +6,20 @@
     safe_distance: 1.5
     linear_speed: 0.25
     slow_speed: 0.12
-    angular_speed: 0.35
+    angular_speed: 1.2
     robot_width: 0.24
-    clearance: 0.1
-    stuck_timeout: 20.0
-    wheelbase: 0.24
     track_width: 0.24
     wheel_radius: 0.04
-    scan_timeout: 3.0
-    recovery_back_distance: 0.8
-    max_steering_angle: 0.6
+    clearance: 0.1
     collision_margin: 0.35
-    reverse_speed: -0.12
-    debug: false
+    recovery_back_distance: 0.4
+    scan_timeout: 3.0
+    smooth_factor: 0.20
+    max_accel_linear: 0.4
+    max_accel_angular: 3.0
+    front_angle: 30.0
+    side_angle: 90.0
+    loop_radius: 1.0
+    loop_count_threshold: 5
+    loop_history_size: 200
+    debug: true

@@ -89,38 +89,7 @@
     <limit effort="5.0" velocity="10"/>
   </joint>
 
-  <!-- ==================== FRONT STEERING ==================== -->
-  <link name="fl_steering_link">
-    <inertial>
-      <mass value="0.01"/>
-      <inertia ixx="0.00001" ixy="0" ixz="0" iyy="0.00001" iyz="0" izz="0.00001"/>
-    </inertial>
-  </link>
-
-  <link name="fr_steering_link">
-    <inertial>
-      <mass value="0.01"/>
-      <inertia ixx="0.00001" ixy="0" ixz="0" iyy="0.00001" iyz="0" izz="0.00001"/>
-    </inertial>
-  </link>
-
-  <joint name="fl_steering_joint" type="revolute">
-    <parent link="base_link"/>
-    <child link="fl_steering_link"/>
-    <origin xyz="${front_x} ${wheel_y} ${wheel_z}" rpy="0 0 0"/>
-    <axis xyz="0 0 1"/>
-    <limit lower="-0.6" upper="0.6" effort="0.5" velocity="5"/>
-  </joint>
-
-  <joint name="fr_steering_joint" type="revolute">
-    <parent link="base_link"/>
-    <child link="fr_steering_link"/>
-    <origin xyz="${front_x} ${-wheel_y} ${wheel_z}" rpy="0 0 0"/>
-    <axis xyz="0 0 1"/>
-    <limit lower="-0.6" upper="0.6" effort="0.5" velocity="5"/>
-  </joint>
-
-  <!-- Front wheel spin (passive, free-spinning) -->
+  <!-- ==================== FRONT WHEELS (driven, no steering) ==================== -->
   <link name="fl_front_wheel">
     <visual>
       <geometry><cylinder radius="${wheel_radius}" length="${wheel_width}"/></geometry>
@@ -153,20 +122,20 @@
     </inertial>
   </link>
 
-  <joint name="fl_wheel_spin_joint" type="continuous">
-    <parent link="fl_steering_link"/>
+  <joint name="fl_wheel_joint" type="continuous">
+    <parent link="base_link"/>
     <child link="fl_front_wheel"/>
-    <origin xyz="0 0 0" rpy="0 0 0"/>
+    <origin xyz="${front_x} ${wheel_y} ${wheel_z}" rpy="0 0 0"/>
     <axis xyz="0 1 0"/>
-    <limit effort="0.01" velocity="10"/>
+    <limit effort="5.0" velocity="10"/>
   </joint>
 
-  <joint name="fr_wheel_spin_joint" type="continuous">
-    <parent link="fr_steering_link"/>
+  <joint name="fr_wheel_joint" type="continuous">
+    <parent link="base_link"/>
     <child link="fr_front_wheel"/>
-    <origin xyz="0 0 0" rpy="0 0 0"/>
+    <origin xyz="${front_x} ${-wheel_y} ${wheel_z}" rpy="0 0 0"/>
     <axis xyz="0 1 0"/>
-    <limit effort="0.01" velocity="10"/>
+    <limit effort="5.0" velocity="10"/>
   </joint>
 
   <!-- ==================== LIDAR ==================== -->
@@ -194,29 +163,15 @@
 
   <!-- ==================== GAZEBO PLUGINS ==================== -->
   <gazebo>
-    <plugin filename="gz-sim-joint-controller-system" name="gz::sim::systems::JointController">
-      <joint_name>rl_wheel_joint</joint_name>
-    </plugin>
-    <plugin filename="gz-sim-joint-controller-system" name="gz::sim::systems::JointController">
-      <joint_name>rr_wheel_joint</joint_name>
-    </plugin>
-    <plugin filename="gz-sim-joint-position-controller-system" name="gz::sim::systems::JointPositionController">
-      <joint_name>fl_steering_joint</joint_name>
-      <topic>/model/evasor_bot/joint/fl_steering_joint/cmd_pos</topic>
-      <p_gain>1.0</p_gain>
-      <i_gain>0.1</i_gain>
-      <d_gain>0.01</d_gain>
-      <cmd_max>0.6</cmd_max>
-      <cmd_min>-0.6</cmd_min>
-    </plugin>
-    <plugin filename="gz-sim-joint-position-controller-system" name="gz::sim::systems::JointPositionController">
-      <joint_name>fr_steering_joint</joint_name>
-      <topic>/model/evasor_bot/joint/fr_steering_joint/cmd_pos</topic>
-      <p_gain>1.0</p_gain>
-      <i_gain>0.1</i_gain>
-      <d_gain>0.01</d_gain>
-      <cmd_max>0.6</cmd_max>
-      <cmd_min>-0.6</cmd_min>
+    <plugin filename="gz-sim-diff-drive-system" name="gz::sim::systems::DiffDrive">
+      <left_joint>rl_wheel_joint</left_joint>
+      <right_joint>rr_wheel_joint</right_joint>
+      <wheel_separation>0.24</wheel_separation>
+      <wheel_radius>0.04</wheel_radius>
+      <topic>/cmd_vel</topic>
+      <odom_topic>/model/evasor_bot/odometry</odom_topic>
+      <publish_odom>false</publish_odom>
+      <publish_odom_tf>false</publish_odom_tf>
     </plugin>
     <plugin filename="gz-sim-joint-state-publisher-system" name="gz::sim::systems::JointStatePublisher">
     </plugin>
@@ -226,6 +181,7 @@
     <sensor type="gpu_lidar" name="lidar_sensor">
       <pose>0 0 0 0 0 0</pose>
       <topic>/scan</topic>
+      <frame_id>lidar_link</frame_id>
       <update_rate>10</update_rate>
       <lidar>
         <scan>
@@ -250,6 +206,28 @@
       <always_on>1</always_on>
       <visualize>true</visualize>
     </sensor>
+  </gazebo>
+
+  <gazebo reference="fl_front_wheel">
+    <mu1>0.1</mu1>
+    <mu2>0.1</mu2>
+    <fudge_factor>0.5</fudge_factor>
+  </gazebo>
+
+  <gazebo reference="fr_front_wheel">
+    <mu1>0.1</mu1>
+    <mu2>0.1</mu2>
+    <fudge_factor>0.5</fudge_factor>
+  </gazebo>
+
+  <gazebo reference="rl_rear_wheel">
+    <mu1>1.0</mu1>
+    <mu2>1.0</mu2>
+  </gazebo>
+
+  <gazebo reference="rr_rear_wheel">
+    <mu1>1.0</mu1>
+    <mu2>1.0</mu2>
   </gazebo>
 
   <gazebo reference="base_link">
