@@ -103,6 +103,12 @@ def generate_launch_description():
                 ]
             }]
         ),
+        Node(
+            package='nav2_collision_monitor',
+            executable='collision_monitor',
+            output='screen',
+            parameters=[LaunchConfiguration('params_file'), {'use_sim_time': use_sim_time}],
+        ),
 
         # --- Lifecycle Manager for SLAM (independiente para evitar deadlock con Nav2) ---
         Node(
@@ -113,6 +119,7 @@ def generate_launch_description():
             parameters=[{
                 'use_sim_time': use_sim_time,
                 'autostart': True,
+                'bond_timeout': 10.0,
                 'node_names': ['slam_toolbox'],
             }],
             condition=IfCondition(slam),

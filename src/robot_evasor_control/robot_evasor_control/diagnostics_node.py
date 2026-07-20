@@ -7,7 +7,8 @@ import tf2_ros
 from nav_msgs.msg import Odometry
 from sensor_msgs.msg import LaserScan
 from geometry_msgs.msg import Twist
-from actionlib_msgs.msg import GoalStatusArray
+from action_msgs.msg import GoalStatusArray
+from rclpy.qos import QoSProfile, QoSDurabilityPolicy
 
 
 class DiagnosticsNode(Node):
@@ -34,8 +35,9 @@ class DiagnosticsNode(Node):
         self.cmd_vel_received = False
         self.cmd_vel_count = 0
 
+        action_qos = QoSProfile(depth=10, durability=QoSDurabilityPolicy.TRANSIENT_LOCAL)
         self.nav_status_sub = self.create_subscription(
-            GoalStatusArray, '/navigate_to_pose/_action/status', self.goal_status_callback, 10)
+            GoalStatusArray, '/navigate_to_pose/_action/status', self.goal_status_callback, action_qos)
         self.goal_status_count = 0
         self.last_goal_status = 'NONE'
 

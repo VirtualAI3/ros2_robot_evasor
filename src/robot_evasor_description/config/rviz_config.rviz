@@ -13,6 +13,8 @@ Panels:
     Name: Views
   - Class: rviz_common/Time
     Name: Time
+  - Class: nav2_rviz_plugins/Navigation 2
+    Name: Navigation 2
 
 Visualization Manager:
   Class: ""
@@ -103,6 +105,9 @@ Visualization Manager:
     - Class: rviz_default_plugins/FocusCamera
     - Class: rviz_default_plugins/Measure
     - Class: nav2_rviz_plugins/GoalTool
+    - Class: rviz_default_plugins/SetGoal
+      Name: Set Goal
+      Topic: /goal_pose
     - Class: rviz_default_plugins/SetInitialPose
   Value: true
   Views:
