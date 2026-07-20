@@ -8,31 +8,32 @@ from launch_ros.substitutions import FindPackageShare
 
 def generate_launch_description():
     return LaunchDescription([
+        # Gazebo + robot_state_publisher + bridge + spawn
         IncludeLaunchDescription(
             PythonLaunchDescriptionSource([
                 PathJoinSubstitution([
-                    FindPackageShare('robot_evasor_gazebo'), 'launch', 'gazebo.launch.py'
+                    FindPackageShare('robot_evasor_gazebo'),
+                    'launch', 'gazebo.launch.py'
                 ])
             ]),
         ),
-        Node(
-            package='robot_evasor_control',
-            executable='vfh_controller.py',
-            output='screen',
-            parameters=[
+        # Nav2 + SLAM Toolbox
+        IncludeLaunchDescription(
+            PythonLaunchDescriptionSource([
                 PathJoinSubstitution([
                     FindPackageShare('robot_evasor_control'),
-                    'config', 'vfh_params.yaml'
-                ]),
-                {'use_sim_time': True},
-            ],
+                    'launch', 'nav2_launch.py'
+                ])
+            ]),
         ),
+        # RViz2
         Node(
             package='rviz2',
             executable='rviz2',
             output='log',
             arguments=['-d', PathJoinSubstitution([
-                FindPackageShare('robot_evasor_description'), 'config', 'rviz_config.rviz'
+                FindPackageShare('robot_evasor_description'),
+                'config', 'rviz_config.rviz'
             ])],
         ),
     ])

@@ -49,34 +49,52 @@ Visualization Manager:
       Alpha: 0.8
       Color: 255; 0; 0
       Value: true
-    - Class: rviz_default_plugins/Marker
-      Enabled: true
-      Name: GoalMarker
-      Topic:
-        Value: /goal_marker
-      Queue Size: 10
-      Value: true
-    - Class: rviz_default_plugins/Marker
-      Enabled: true
-      Name: ObstacleMarkers
-      Topic:
-        Value: /obstacle_markers
-      Queue Size: 10
-      Value: true
     - Class: rviz_default_plugins/TF
-      Enabled: true
+      Enabled: false
       Name: TF
-      Show Arrows: true
+      Show Arrows: false
       Show Axes: true
-      Show Names: true
+      Show Names: false
       Tree:
         Enabled: false
+      Value: false
+    # --- Nav2 Displays ---
+    - Class: rviz_default_plugins/Map
+      Enabled: true
+      Name: Map
+      Topic:
+        Value: /map
+      Color Scheme: Map
+      Draw Behind: true
+      Alpha: 0.7
+      Value: true
+    - Class: rviz_default_plugins/PoseArray
+      Enabled: true
+      Name: PoseArray
+      Topic:
+        Value: /particle_cloud
+      Color: 192; 128; 0
+      Arrow Length: 0.05
+      Shaft Length: 0.05
+      Head Length: 0.05
+      Shaft Diameter: 0.02
+      Head Diameter: 0.06
+      Value: true
+    - Class: rviz_default_plugins/Path
+      Enabled: true
+      Name: GlobalPlan
+      Topic:
+        Value: /plan
+      Line Style: Lines
+      Line Width: 0.03
+      Color: 25; 255; 0
+      Alpha: 0.75
       Value: true
   Enabled: true
   Global Options:
     Background Color: 48; 48; 48
     Frame Rate: 30
-    Fixed Frame: odom
+    Fixed Frame: map
   Name: root
   Tools:
     - Class: rviz_default_plugins/Interact
@@ -84,6 +102,8 @@ Visualization Manager:
     - Class: rviz_default_plugins/Select
     - Class: rviz_default_plugins/FocusCamera
     - Class: rviz_default_plugins/Measure
+    - Class: nav2_rviz_plugins/GoalTool
+    - Class: rviz_default_plugins/SetInitialPose
   Value: true
   Views:
     Current:

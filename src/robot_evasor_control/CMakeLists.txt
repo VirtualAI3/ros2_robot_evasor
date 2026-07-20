@@ -5,8 +5,8 @@ find_package(ament_cmake REQUIRED)
 find_package(ament_cmake_python REQUIRED)
 
 install(PROGRAMS
-  robot_evasor_control/reactive_controller.py
-  robot_evasor_control/vfh_controller.py
+  robot_evasor_control/odom_to_tf.py
+  robot_evasor_control/diagnostics_node.py
   DESTINATION lib/${PROJECT_NAME}
 )
 
