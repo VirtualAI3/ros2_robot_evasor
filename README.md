@@ -36,10 +36,10 @@ Esto inicia Gazebo con el mundo simulado, el robot, el stack completo de Nav2, S
 
 ### En RViz
 
-1. **2D Pose Estimate** — haz clic en el mapa donde está el robot para darle la pose inicial.
-2. **Nav2 Goal** — haz clic en cualquier punto del mapa para enviar un destino. El robot planificará una ruta, esquivará obstáculos y navegará hasta allí.
+1. **2D Pose Estimate** - haz clic en el mapa donde está el robot para darle la pose inicial.
+2. **Nav2 Goal** - haz clic en cualquier punto del mapa para enviar un destino. El robot planificará una ruta, esquivará obstáculos y navegará hasta allí.
 
-## Robot — evasor_bot
+## Robot - evasor_bot
 
 Robot diferencial de 4 ruedas con Lidar 360°.
 
@@ -67,20 +67,20 @@ Habitación de 10 × 10 m con 4 paredes y 5 obstáculos distribuidos (cajas y ci
 ```
 Gazebo Sim (room.world + evasor_bot)
     │
-    ├── /scan, /odometry, /joint_states  ──→  ros_gz_bridge  ──→  ROS 2 topics
+    ├── /scan, /odometry, /joint_states  →  ros_gz_bridge →  ROS 2 topics
     │
-    ├── robot_state_publisher  ──→  TF joint → base_link
+    ├── robot_state_publisher  →  TF joint → base_link
     │
-    ├── odom_to_tf.py  ──→  TF odom → base_footprint
+    ├── odom_to_tf.py  →  TF odom → base_footprint
     │
     └── Nav2 Stack:
-         ├── SLAM Toolbox  ──→  /map, TF map → odom
-         ├── AMCL  ──→  localización por partículas
-         ├── Planner Server (Navfn)  ──→  ruta global
-         ├── Controller Server (MPPI)  ──→  control local + cmd_vel
-         ├── Velocity Smoother  ──→  suavizado de velocidades
-         ├── Collision Monitor  ──→  parada de emergencia
-         └── BT Navigator  ──→  orquestación de navegación
+         ├── SLAM Toolbox  →  /map, TF map → odom
+         ├── AMCL  →  localización por partículas
+         ├── Planner Server (Navfn)  →  ruta global
+         ├── Controller Server (MPPI)  →  control local + cmd_vel
+         ├── Velocity Smoother  →  suavizado de velocidades
+         ├── Collision Monitor  →  parada de emergencia
+         └── BT Navigator  →  orquestación de navegación
               ↑
     RViz (GoalTool → /goal_pose)
 ```
