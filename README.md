@@ -24,8 +24,12 @@ source install/setup.bash
 
 ```bash
 ros2 launch robot_evasor_bringup bringup.launch.py
+```
 
-__NV_PRIME_RENDER_OFFLOAD=1 __GLX_VENDOR_LIBRARY_NAME=nvidia   ros2 launch robot_evasor_bringup bringup.launch.py diagnostics:=true #En case de querer usar GPU
+En caso de querer usar GPU
+
+```bash
+__NV_PRIME_RENDER_OFFLOAD=1 __GLX_VENDOR_LIBRARY_NAME=nvidia ros2 launch robot_evasor_bringup bringup.launch.py
 ```
 
 Esto inicia Gazebo con el mundo simulado, el robot, el stack completo de Nav2, SLAM Toolbox y RViz.
